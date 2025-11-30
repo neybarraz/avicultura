@@ -1,0 +1,12 @@
+data,milho_pct,farelo_soja_pct,calcario_pct,nucleo_pct,consumo_g_ave_dia,ovos_granja,ovos_escola,ovos_quebrados,ovos_sem_casca,ovos_deformados,aves_doentes,observacao
+2025-09-01,63.5,20.0,8.5,8.0,95.2,150,132,3,2,1,2,"Início monitoramento"
+2025-09-02,63.5,20.0,8.5,8.0,96.1,120,90,4,1,2,3,"Queda na produção"
+2025-09-03,63.5,20.0,8.5,8.0,92.0,240,200,5,2,3,5,"Pico de produção; perdas no transporte"
+2025-09-04,63.5,20.0,8.5,8.0,94.0,206,173,6,3,2,4,"Produção intermediária"
+2025-09-05,63.5,20.0,8.5,8.0,89.5,173,95,8,4,3,6,"Consumo muito baixo; piora de qualidade"
+2025-09-06,63.5,20.0,8.5,8.0,90.3,157,140,3,1,1,3,"Leve recuperação"
+2025-09-07,63.5,20.0,8.5,8.0,91.8,150,138,2,1,1,2,"Estável"
+2025-09-08,63.5,20.0,8.5,8.0,93.0,168,149,4,2,1,3,"Oscilação pequena"
+2025-09-09,63.5,20.0,8.5,8.0,96.7,173,160,3,1,1,2,"Melhora consumo"
+2025-09-10,63.5,20.0,8.5,8.0,97.3,184,170,4,1,1,2,"Tendência positiva"
+2025-09-11,63.5,20.0,8.5,8.0,100.4,187,175,3,1,1,1,"Maior consumo registrado"
