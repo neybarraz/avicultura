@@ -7,8 +7,8 @@ from glob import glob
 import numpy as np
 import pandas as pd
 import streamlit as st
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
+#import matplotlib.pyplot as plt
+#import matplotlib.dates as mdates
 import altair as alt
 from datetime import timedelta
 import streamlit.components.v1 as components
@@ -846,3 +846,4 @@ elif secao == "Produção e perdas":
     scroll_to("producao")
 elif secao == "Qualidade & sanidade":
     scroll_to("qualidade")
+
