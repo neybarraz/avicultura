@@ -677,10 +677,6 @@ else:
         ylim=None,
     )
 
-    st.caption(
-        "Cada card utiliza as 10 leituras mais recentes do arquivo `mistura_racao.csv`."
-    )
-
 
 # =============================================================================
 # PARTE 6 – SEÇÃO 2: CONSUMO (VERTICAL)
@@ -846,4 +842,5 @@ elif secao == "Produção e perdas":
     scroll_to("producao")
 elif secao == "Qualidade & sanidade":
     scroll_to("qualidade")
+
 
