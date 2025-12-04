@@ -7,12 +7,9 @@ from glob import glob
 import numpy as np
 import pandas as pd
 import streamlit as st
-#import matplotlib.pyplot as plt
-#import matplotlib.dates as mdates
 import altair as alt
 from datetime import timedelta
 import streamlit.components.v1 as components
-
 
 
 # Configuração da página do Streamlit
@@ -22,8 +19,7 @@ st.set_page_config(
 )
 
 # Âncora de topo para navegação
-#st.markdown("<div id='topo'></div>", unsafe_allow_html=True)
-st.markdown("<div id='topo' style='position: relative; top: -30px;'></div>",unsafe_allow_html=True,)
+st.markdown("<div id='topo' style='position: relative; top: -30px;'></div>", unsafe_allow_html=True)
 
 st.title("Avicultura · Dashboard automático a partir de CSV")
 st.caption(
@@ -77,7 +73,13 @@ if "data" not in dados.columns:
     st.error("Coluna obrigatória 'data' não encontrada nos CSV.")
     st.stop()
 
-dados["data"] = pd.to_datetime(dados["data"], errors="coerce")
+dados["data"] = pd.to_datetime(
+    dados["data"].astype(str).str.strip(),
+    format="%d/%m/%Y",
+    dayfirst=True,
+    errors="coerce",
+)
+
 dados = dados.dropna(subset=["data"])
 dados = dados.sort_values("data")
 
@@ -106,9 +108,7 @@ if {"ovos_granja", "ovos_escola"}.issubset(dados.columns):
 else:
     dados["perda_ovos"] = np.nan
 
-if {"ovos_quebrados", "ovos_sem_casca", "ovos_deformados", "ovos_granja"}.issubset(
-    dados.columns
-):
+if {"ovos_quebrados", "ovos_sem_casca", "ovos_deformados", "ovos_granja"}.issubset(dados.columns):
     dados["ovos_defeituosos"] = (
         dados["ovos_quebrados"]
         + dados["ovos_sem_casca"]
@@ -196,13 +196,13 @@ with col4:
 
 st.markdown("---")
 
+
 # -------------------- Função de navegação (scroll por âncora) ----------------
 def scroll_to(anchor: str):
     """
     Rola até o elemento com o id fornecido.
     O deslocamento para não cortar o título será feito no próprio <div id='...'>.
     """
-
     components.html(
         f"""
         <script>
@@ -216,8 +216,6 @@ def scroll_to(anchor: str):
         """,
         height=0,
     )
-
-
 
 
 # -------------------- Menu lateral de navegação rápida -----------------------
@@ -236,52 +234,30 @@ with st.sidebar:
         index=0,
     )
 
-# Dispara o scroll conforme a seção escolhida
-#if secao == "Topo":
-#    scroll_to("topo")
-#elif secao == "Mistura da ração":
-#    scroll_to("mistura")
-#elif secao == "Consumo":
-#    scroll_to("consumo")
-#elif secao == "Produção e perdas":
-#    scroll_to("producao")
-#elif secao == "Qualidade & sanidade":
-#    scroll_to("qualidade")
-
 
 # =============================================================================
-# PARTE 4 – FUNÇÕES AUXILIARES (GRÁFICO E DIAGNÓSTICO DA MISTURA)
+# PARTE 4 – FUNÇÕES AUXILIARES (GRÁFICO E DIAGNÓSTICO)
 # =============================================================================
-def chart_serie_altair(df, col, titulo, ref_min, ref_max, ylim=None):
+def _build_x_axis_and_scale(df_plot):
     """
-    Cria um gráfico Altair no mesmo estilo visual dos outros gráficos do Streamlit,
-    com:
-      - faixa de referência definida por [ref_min, ref_max] (livre para cada gráfico);
-      - meses em português no eixo X;
-      - marcações de eixo a cada 5 dias (5, 10, 15, 20, ...);
-      - folga extra no final do eixo X para não cortar o último ponto.
-
-    df      : DataFrame com colunas 'data' e 'col'
-    col     : nome da coluna de interesse (string)
-    titulo  : título do gráfico (string)
-    ref_min : limite inferior da faixa alvo (float)
-    ref_max : limite superior da faixa alvo (float)
-    ylim    : tupla (ymin, ymax) opcional para limitar o eixo Y
+    Constrói eixo X padronizado (datas) para todos os gráficos Altair:
+    - Domínio: últimos 30 dias até a data de hoje;
+    - Ticks explícitos a cada 7 dias, SEMPRE terminando em hoje;
+    - Formato 'dia mês' (ex.: 05 Dez) com meses em português.
     """
-
-    df_plot = df.copy()
-    df_plot["ref_min"] = ref_min
-    df_plot["ref_max"] = ref_max
-
-    # Domínio de datas com "folga" no fim para não cortar o último ponto
+    # Janela fixa: últimos 30 dias até hoje
     hoje = pd.Timestamp.today().normalize()
-    dmax = hoje + pd.Timedelta(days=2)
-    dmin = dmax - pd.Timedelta(days=30)  # janela fixa de 30 dias
+    dmin = hoje - pd.Timedelta(days=30)
+    dmax = hoje
 
-    # Escala vertical única para todas as camadas
-    scale_y = alt.Scale(domain=ylim, nice=False) if ylim else alt.Undefined
+    # Ticks semanais: hoje, hoje-7, hoje-14, ... dentro do domínio
+    valores_ticks = []
+    dia = hoje
+    while dia >= dmin:
+        valores_ticks.append(dia)
+        dia -= pd.Timedelta(days=7)
+    valores_ticks = list(reversed(valores_ticks))  # em ordem crescente
 
-    # Expressão Vega-Lite para traduzir abreviações de meses para português
     label_expr = (
         "replace("
         "replace("
@@ -309,57 +285,95 @@ def chart_serie_altair(df, col, titulo, ref_min, ref_max, ylim=None):
         "'Dec','Dez')"
     )
 
-    # Eixo X: marcações a cada 5 dias
     x_axis = alt.Axis(
         title="",
-        format="%d %b",                     # dia + mês abreviado
-        tickCount={"interval": "day", "step": 5},
+        format="%d %b",
+        values=valores_ticks,  # ticks explícitos (hoje, -7, -14, ...)
         labelExpr=label_expr,
     )
 
     x_scale = alt.Scale(domain=[dmin, dmax])
 
+    return x_axis, x_scale
+
+
+
+
+def chart_serie_altair(
+    df,
+    col,
+    titulo,
+    ref_min=None,
+    ref_max=None,
+    ylim=None,
+    y_label=None,
+    value_format=".1f",
+    tooltip_label=None,
+):
+    """
+    Cria um gráfico Altair de série temporal com:
+      - eixo X padronizado (datas em PT-BR, ticks a cada 5 dias);
+      - faixa de referência opcional [ref_min, ref_max];
+      - personalização do rótulo do eixo Y e formatação de valores.
+    """
+    if df.empty or col not in df.columns:
+        return None
+
+    df_plot = df.copy()
+
+    if y_label is None:
+        y_label = "%"
+    if tooltip_label is None:
+        tooltip_label = "Valor"
+
+    x_axis, x_scale = _build_x_axis_and_scale(df_plot)
+    scale_y = alt.Scale(domain=ylim, nice=False) if ylim else alt.Undefined
+
     base = alt.Chart(df_plot).encode(
-        x=alt.X(
-            "data:T",
-            axis=x_axis,
-            scale=x_scale,
+        x=alt.X("data:T", axis=x_axis, scale=x_scale)
+    )
+
+    camadas = []
+
+    # Faixa de referência, se fornecida
+    if (ref_min is not None) and (ref_max is not None):
+        df_plot["ref_min"] = ref_min
+        df_plot["ref_max"] = ref_max
+        faixa = base.mark_area(opacity=0.15).encode(
+            y=alt.Y("ref_min:Q", scale=scale_y),
+            y2=alt.Y2("ref_max:Q"),
         )
-    )
+        camadas.append(faixa)
 
-    # Faixa de referência [ref_min, ref_max] usando a MESMA escala Y
-    faixa = base.mark_area(opacity=0.15).encode(
-        y=alt.Y("ref_min:Q", scale=scale_y),
-        y2=alt.Y2("ref_max:Q"),
-    )
-
-    # Linha da série com a MESMA escala Y
+    # Linha principal
     linha = base.mark_line().encode(
-        y=alt.Y(f"{col}:Q", title="%", scale=scale_y),
+        y=alt.Y(f"{col}:Q", title=y_label, scale=scale_y),
     )
+    camadas.append(linha)
 
-    # Pontos na linha usando mesma escala
+    # Pontos
     pontos = base.mark_point(size=60).encode(
         y=alt.Y(f"{col}:Q", scale=scale_y),
         tooltip=[
             alt.Tooltip("data:T", title="Data"),
-            alt.Tooltip(f"{col}:Q", title="Valor (%)", format=".1f"),
+            alt.Tooltip(f"{col}:Q", title=tooltip_label, format=value_format),
         ],
     )
+    camadas.append(pontos)
 
-    # Rótulos numéricos sobre os pontos, mesma escala
+    # Rótulos numéricos sobre os pontos
     textos = base.mark_text(dy=-20, fontSize=15, color="white").encode(
         y=alt.Y(f"{col}:Q", scale=scale_y),
-        text=alt.Text(f"{col}:Q", format=".1f"),
+        text=alt.Text(f"{col}:Q", format=value_format),
     )
+    camadas.append(textos)
 
-    chart = (faixa + linha + pontos + textos).properties(
+    chart = alt.layer(*camadas).properties(
         height=250,
         title=titulo,
     )
 
     return chart.interactive()
-
 
 
 def diagnostico_serie(df, col, ref_min, ref_max, nome):
@@ -378,9 +392,6 @@ def diagnostico_serie(df, col, ref_min, ref_max, nome):
     if y.empty:
         return f"Diagnóstico para {nome}: série sem dados válidos (após remoção de NaN)."
 
-    # -------------------------------------------------------------------------
-    # 1) Estatística global simples: quantos pontos dentro / acima / abaixo
-    # -------------------------------------------------------------------------
     dentro = ((y >= ref_min) & (y <= ref_max)).sum()
     acima = (y > ref_max).sum()
     abaixo = (y < ref_min).sum()
@@ -404,9 +415,6 @@ def diagnostico_serie(df, col, ref_min, ref_max, nome):
             "mas ainda há espaço para ajustes finos."
         )
 
-    # -------------------------------------------------------------------------
-    # 2) Tendência recente: média dos 2 últimos registros
-    # -------------------------------------------------------------------------
     if len(y) >= 2:
         ultimos = y.tail(2)
         janela_desc = "2 últimos registros"
@@ -419,7 +427,6 @@ def diagnostico_serie(df, col, ref_min, ref_max, nome):
         f"A média dos **{janela_desc}** é **{media_ultimos:.1f} %**."
     )
 
-    # Situação recente em relação à faixa
     if media_ultimos > ref_max:
         tendencia = "acima"
     elif media_ultimos < ref_min:
@@ -427,9 +434,6 @@ def diagnostico_serie(df, col, ref_min, ref_max, nome):
     else:
         tendencia = "dentro"
 
-    # -------------------------------------------------------------------------
-    # 3) Alerta nutricional específico por ingrediente
-    # -------------------------------------------------------------------------
     nome_lower = nome.lower()
 
     alerta = ""
@@ -505,6 +509,124 @@ def diagnostico_serie(df, col, ref_min, ref_max, nome):
 
     return " ".join(partes)
 
+def diagnostico_consumo(df, col, ref_min, ref_max, nome="Consumo de ração"):
+    """
+    Gera um texto de diagnóstico para o CONSUMO de ração (g/ave/dia),
+    usando a faixa [ref_min, ref_max].
+
+    Inclui:
+    - contagem de dias abaixo / dentro / acima da faixa;
+    - análise da média dos 2 últimos registros;
+    - interpretação zootécnica para consumo baixo, alto ou dentro da faixa.
+    """
+    if df.empty or col not in df.columns:
+        return f"Diagnóstico para {nome}: série sem dados suficientes."
+
+    y = df[col].dropna()
+    if y.empty:
+        return f"Diagnóstico para {nome}: série sem dados válidos (após remoção de NaN)."
+
+    # -------------------------------------------------------------------------
+    # 1) Estatística global: quantos dias em cada faixa
+    # -------------------------------------------------------------------------
+    dentro = ((y >= ref_min) & (y <= ref_max)).sum()
+    acima = (y > ref_max).sum()
+    abaixo = (y < ref_min).sum()
+    total = len(y)
+
+    partes = []
+    partes.append(
+        f"No período analisado (**{total} dias** com dados válidos), "
+        f"**{abaixo}** dia(s) ficaram **abaixo** da faixa alvo "
+        f"({ref_min:.0f}–{ref_max:.0f} g/ave/dia), "
+        f"**{dentro}** dentro e **{acima}** **acima**."
+    )
+
+    if dentro == total:
+        partes.append(
+            "O padrão de consumo está **bem ajustado** à faixa recomendada, "
+            "o que tende a favorecer estabilidade de produção e conversão alimentar."
+        )
+    elif abaixo > acima:
+        partes.append(
+            "Predomina consumo **abaixo** da faixa ideal, sugerindo possível limitação de ingestão "
+            "ou problemas pontuais de manejo/ambiência."
+        )
+    elif acima > abaixo:
+        partes.append(
+            "Predomina consumo **acima** da faixa ideal, indicando risco de **desperdício de ração** "
+            "e aumento de custo por dúzia de ovos se a produção não acompanha esse aumento."
+        )
+    else:
+        partes.append(
+            "Há **variabilidade relevante** no consumo, alternando dias abaixo e acima da faixa. "
+            "Vale investigar se há mudanças de manejo, temperatura ou formulação ao longo do período."
+        )
+
+    # -------------------------------------------------------------------------
+    # 2) Tendência recente: média dos 2 últimos registros
+    # -------------------------------------------------------------------------
+    if len(y) >= 2:
+        ultimos = y.tail(2)
+        janela_desc = "2 últimos registros"
+    else:
+        ultimos = y
+        janela_desc = "registros disponíveis"
+
+    media_ultimos = ultimos.mean()
+    partes.append(
+        f"A média dos **{janela_desc}** é **{media_ultimos:.1f} g/ave/dia**."
+    )
+
+    if media_ultimos > ref_max:
+        tendencia = "acima"
+    elif media_ultimos < ref_min:
+        tendencia = "abaixo"
+    else:
+        tendencia = "dentro"
+
+    # -------------------------------------------------------------------------
+    # 3) Interpretação zootécnica da tendência recente
+    # -------------------------------------------------------------------------
+    if tendencia == "abaixo":
+        alerta = (
+            "A **tendência recente é de consumo ABAIXO da faixa ideal**. "
+            "Isso pode indicar:\n"
+            "- **Oferta diária de ração insuficiente**, os comedouros não estão recebendo ração suficiente no momento do trato;\n"
+            "- **Baixa ingestão** por competição em comedouros ou densidade elevada;\n"
+            "- Ambiência desfavorável (calor excessivo, frio intenso ou variações bruscas);\n"
+            "- Problemas de acesso à ração (altura de comedouros, segregação de lotes, falhas na distribuição);\n"
+            "- Palatabilidade ou granulometria inadequadas, levando as aves a selecionar ou desperdiçar parte da mistura.\n\n"
+            "Do ponto de vista produtivo, consumo baixo tende a resultar em **queda de produção**, "
+            "**ovos menores** e **pior persistência de postura** se mantido por vários dias. "
+            "Recomenda-se conferir se a **quantidade oferecida por trato** está adequada e se os comedouros "
+            "não permanecem vazios por longos períodos."
+        )
+    elif tendencia == "acima":
+        alerta = (
+            "A **tendência recente é de consumo ACIMA da faixa ideal**. "
+            "Situações possíveis:\n"
+            "- **Excesso de ração ofertada em cada trato**, com comedouros permanecendo cheios e "
+            "sobras significativas ao final do dia (ração velha, fina e mais sujeita a seleção e desperdício);\n"
+            "- Ajustes de manejo que aumentaram o acesso à ração, mas sem controle fino de quantidade ofertada;\n"
+            "- Granulometria muito fina ou muito grossa, levando a **desperdício por seleção** e queda de eficiência;\n"
+            "- Formulação com densidade energética mais baixa, fazendo a ave comer mais para compensar.\n\n"
+            "Se o aumento de consumo **não vier acompanhado de ganho proporcional em produção**, "
+            "há risco de **piorar a conversão alimentar** e **elevar o custo por dúzia de ovos**. "
+            "Vale revisar se há **sobras excessivas nos comedouros** e ajustar a quantidade fornecida por trato."
+        )
+    else:  # dentro da faixa
+        alerta = (
+            "A **tendência recente permanece DENTRO da faixa recomendada**, "
+            "o que sugere um **ajuste adequado entre ambiência, manejo, quantidade ofertada e formulação**. "
+            "Vale manter o monitoramento contínuo para captar rapidamente qualquer desvio, "
+            "especialmente em períodos de mudança de temperatura, fase de postura ou alteração de ração."
+        )
+
+
+    partes.append(alerta)
+
+    return " ".join(partes)
 
 
 def bloco_instagram_mistura(df, col, titulo, ref_min, ref_max, texto_ref, nome_curto, ylim=None):
@@ -519,9 +641,19 @@ def bloco_instagram_mistura(df, col, titulo, ref_min, ref_max, texto_ref, nome_c
     st.markdown(f"### {titulo}")
     st.markdown(texto_ref)
 
-    # Gráfico Altair no estilo dos demais gráficos do dashboard
-    chart = chart_serie_altair(df, col, titulo, ref_min=ref_min, ref_max=ref_max, ylim=ylim)
-    st.altair_chart(chart, use_container_width=True)
+    chart = chart_serie_altair(
+        df=df,
+        col=col,
+        titulo=titulo,
+        ref_min=ref_min,
+        ref_max=ref_max,
+        ylim=ylim,
+        y_label="%",
+        value_format=".1f",
+        tooltip_label=f"{nome_curto} (%)",
+    )
+    if chart is not None:
+        st.altair_chart(chart, use_container_width=True)
 
     diag = diagnostico_serie(df, col, ref_min, ref_max, nome_curto)
     st.markdown(f"**Diagnóstico ({nome_curto}):** {diag}")
@@ -529,27 +661,12 @@ def bloco_instagram_mistura(df, col, titulo, ref_min, ref_max, texto_ref, nome_c
     st.markdown("---")
 
 
-
 # =============================================================================
-# PARTE 5 – SEÇÃO 1: MISTURA DA RAÇÃO (FEED VERTICAL)
+# PARTE 5 – SEÇÃO 1: MISTURA DA RAÇÃO
 # =============================================================================
-#st.markdown("<div id='mistura'></div>", unsafe_allow_html=True)
-st.markdown("<div id='mistura' style='position: relative; top: -40px;'></div>",unsafe_allow_html=True,)
+st.markdown("<div id='mistura' style='position: relative; top: -40px;'></div>", unsafe_allow_html=True)
 st.subheader("Mistura da ração · linha do tempo")
 
-#st.markdown(
-#    """
-#    Cada componente da ração é apresentado em um **card vertical**,
-#    em formato de linha do tempo:
-
-#    - título do componente  
-#    - valores de referência (alvo da formulação)  
-#    - gráfico com os últimos 10 dias  
-#    - diagnóstico automático abaixo do gráfico.
-#    """
-#)
-
-# ----- Leitura específica do arquivo mistura_racao.csv -----
 caminho_mistura = os.path.join(PASTA_DADOS, "mistura_racao.csv")
 
 if not os.path.exists(caminho_mistura):
@@ -560,10 +677,8 @@ if not os.path.exists(caminho_mistura):
 else:
     df_mist = pd.read_csv(caminho_mistura)
 
-    # Normaliza nomes de colunas (remove espaços etc.)
     df_mist.columns = [c.strip() for c in df_mist.columns]
 
-    # Mapeamento flexível dos nomes reais para nomes padrão
     colunas_alvo_mist = {
         "data": ["data", "Data", "DATA"],
         "milho_pct": ["milho_pct", "%_milho", "Milho", "Milho (%)", "milho (%)"],
@@ -595,7 +710,6 @@ else:
 
     df_mist = df_norm
 
-    # Converte colunas de % para float (aceita "63,5" e "63.5")
     for c in ["milho_pct", "farelo_soja_pct", "calcario_pct", "nucleo_pct"]:
         df_mist[c] = (
             df_mist[c]
@@ -604,11 +718,9 @@ else:
             .astype(float)
         )
 
-    # Converte data no formato brasileiro (dia/mês/ano),
-    # ordena e mantém sempre as 10 datas mais recentes
     df_mist["data"] = pd.to_datetime(
         df_mist["data"],
-        format="%d/%m/%Y",   # força dia/mês/ano
+        format="%d/%m/%Y",
         dayfirst=True,
         errors="raise",
     )
@@ -616,14 +728,12 @@ else:
     df_mist = df_mist.sort_values("data")
     df_mist = df_mist.tail(10).copy()
 
-    # -------------------- FEED VERTICAL: UM CARD POR COMPONENTE --------------------
-    # Card Milho
     bloco_instagram_mistura(
         df=df_mist,
         col="milho_pct",
         titulo="Milho (%)",
-        ref_min=59,  # faixa inferior específica para o milho
-        ref_max=67,  # faixa superior específica para o milho
+        ref_min=59,
+        ref_max=67,
         texto_ref="""
         **Referência teórica:** 62 % (faixa alvo: 59% – 67 %).  
         **Função:** principal fonte de energia da dieta.
@@ -632,12 +742,11 @@ else:
         ylim=(40, 90),
     )
 
-    # Card Farelo de soja
     bloco_instagram_mistura(
         df=df_mist,
         col="farelo_soja_pct",
         titulo="Farelo de soja (%)",
-        ref_min=22,   # faixa específica para o farelo de soja
+        ref_min=22,
         ref_max=26,
         texto_ref="""
         **Referência teórica:** 24 % (faixa alvo: 22.8% – 25.2%)  
@@ -647,12 +756,11 @@ else:
         ylim=(0, 40),
     )
 
-    # Card Calcário
     bloco_instagram_mistura(
         df=df_mist,
         col="calcario_pct",
         titulo="Calcário (%)",
-        ref_min=9,    # faixa específica para o calcário
+        ref_min=9,
         ref_max=11,
         texto_ref="""
         **Referência teórica:** 10 % (faixa alvo: 9.5% – 10.5%)  
@@ -662,12 +770,11 @@ else:
         ylim=(0, 20),
     )
 
-    # Card Núcleo
     bloco_instagram_mistura(
         df=df_mist,
         col="nucleo_pct",
         titulo="Núcleo (%)",
-        ref_min=3,    # faixa específica para o núcleo
+        ref_min=3,
         ref_max=5,
         texto_ref="""
         **Referência teórica:** 4 % (faixa alvo: 3–5 %)  
@@ -679,69 +786,178 @@ else:
 
 
 # =============================================================================
-# PARTE 6 – SEÇÃO 2: CONSUMO (VERTICAL)
+# PARTE 6 – SEÇÃO 2: CONSUMO
 # =============================================================================
-st.markdown("<div id='consumo' style='position: relative; top: -30px;'></div>",unsafe_allow_html=True,)
-st.subheader("Consumo de ração (g/ave/dia) · linha do tempo")
+# =============================================================================
+# PARTE 6 – SEÇÃO 2: CONSUMO
+# =============================================================================
+st.markdown("<div id='consumo' style='position: relative; top: -40px;'></div>", unsafe_allow_html=True)
+st.markdown("### Consumo de ração (g/ave/dia)")
 
-if "consumo_g_ave_dia" in dados_filtrados.columns:
-    # Gráfico principal (em coluna única)
-    st.line_chart(
-        dados_filtrados.set_index("data")[["consumo_g_ave_dia"]],
-        height=300,
-    )
+st.markdown("""
+**Referência de manejo:** faixa ideal de **105–115 g/ave/dia**.  
+**Função:** garantir ingestão suficiente para atender o requerimento de energia e nutrientes,
+mantendo produção, peso corporal e qualidade de casca adequados.
+""")
 
-    # Texto de referência e diagnóstico abaixo do gráfico
-    st.markdown(
-        f"""
-        **Referência de manejo:** faixa ideal de **{CONSUMO_MIN:.0f}–{CONSUMO_MAX:.0f} g/ave/dia**.  
+caminho_consumo = os.path.join(PASTA_DADOS, "consumo_racao.csv")
 
-        **Diagnóstico automático:**  
-        - Consumo médio no período filtrado: **{consumo_medio:.1f} g/ave/dia**.  
-        - Valores abaixo da faixa podem indicar **baixa ingestão**, competição, problemas de comedouro ou ambiência.  
-        - Valores muito acima podem indicar **desperdício** ou ajustes inadequados de densidade/manejo.
-        """
+if not os.path.exists(caminho_consumo):
+    st.warning(
+        "Arquivo `consumo_racao.csv` não encontrado na pasta de dados. "
+        "Crie-o com as colunas: data,consumo_g_ave_dia."
     )
 else:
-    st.info("Coluna 'consumo_g_ave_dia' não encontrada nos dados.")
+    df_consumo = pd.read_csv(caminho_consumo)
 
-st.markdown("---")
+    # Remove espaços dos nomes de coluna
+    df_consumo.columns = [c.strip() for c in df_consumo.columns]
+
+    if not {"data", "consumo_g_ave_dia"}.issubset(df_consumo.columns):
+        st.error(
+            "O arquivo `consumo_racao.csv` deve conter as colunas "
+            "`data` e `consumo_g_ave_dia`."
+        )
+    else:
+        # Converte data
+        df_consumo["data"] = pd.to_datetime(
+            df_consumo["data"],
+            format="%d/%m/%Y",
+            dayfirst=True,
+            errors="coerce",
+        )
+        df_consumo = df_consumo.dropna(subset=["data"])
+
+        # Garante numérico, aceitando vírgula
+        df_consumo["consumo_g_ave_dia"] = (
+            df_consumo["consumo_g_ave_dia"]
+            .astype(str)
+            .str.replace(",", ".", regex=False)
+            .astype(float)
+        )
+
+        # Aplica o mesmo filtro de período da página
+        mask_consumo = (
+            (df_consumo["data"].dt.date >= ini)
+            & (df_consumo["data"].dt.date <= fim)
+        )
+        df_consumo_filtrado = df_consumo[mask_consumo].copy()
+
+        if df_consumo_filtrado.empty:
+            st.info("Não há dados de `consumo_racao.csv` dentro do período selecionado.")
+        else:
+            # Gráfico em linha com faixa de referência
+            chart_consumo = chart_serie_altair(
+                df=df_consumo_filtrado,
+                col="consumo_g_ave_dia",
+                titulo="Consumo de ração (g/ave/dia)",
+                ref_min=CONSUMO_MIN,
+                ref_max=CONSUMO_MAX,
+                ylim=(80, 140),
+                y_label="Consumo (g/ave/dia)",
+                value_format=".1f",
+                tooltip_label="Consumo (g/ave/dia)",
+            )
+
+            if chart_consumo is not None:
+                st.altair_chart(chart_consumo, use_container_width=True)
+
+            # Estatística para o diagnóstico
+            consumo_medio_periodo = df_consumo_filtrado["consumo_g_ave_dia"].mean()
+
+            diag_consumo = diagnostico_consumo(
+                df=df_consumo_filtrado,
+                col="consumo_g_ave_dia",
+                ref_min=CONSUMO_MIN,
+                ref_max=CONSUMO_MAX,
+                nome="Consumo de ração (g/ave/dia)",
+            )
+
+            # Somente o diagnóstico automático abaixo do gráfico
+            st.markdown(f"**Diagnóstico (Consumo de ração):** {diag_consumo}")
+
+            st.markdown("---")
 
 
 # =============================================================================
 # PARTE 7 – SEÇÃO 3: PRODUÇÃO E PERDAS (VERTICAL)
 # =============================================================================
-st.markdown("<div id='producao' style='position: relative; top: -30px;'></div>",unsafe_allow_html=True,)
+st.markdown("<div id='producao' style='position: relative; top: -40px;'></div>", unsafe_allow_html=True)
 st.subheader("Produção e perdas de ovos · linha do tempo")
 
 if {"ovos_granja", "ovos_escola"}.issubset(dados_filtrados.columns):
-    # Gráfico 1: linhas de produção (granja vs escola)
-    st.markdown("### Produção diária de ovos (granja vs. escola)")
-    st.line_chart(
-        dados_filtrados.set_index("data")[["ovos_granja", "ovos_escola"]],
-        height=300,
-    )
+    df_prod = dados_filtrados[["data", "ovos_granja", "ovos_escola"]].dropna(subset=["ovos_granja", "ovos_escola"]).copy()
 
-    st.markdown(
-        """
-        **Referência conceitual:**  
-        - A curva da escola deveria acompanhar de perto a curva da granja.  
-        - Diferenças sistemáticas indicam perdas no transporte, registro ou manejo.
-        """
-    )
+    if not df_prod.empty:
+        df_long = df_prod.melt(id_vars="data", value_vars=["ovos_granja", "ovos_escola"], var_name="origem", value_name="ovos")
 
-    # Gráfico 2: barras de perdas
-    st.markdown("### Perdas no trajeto (granja → escola)")
-    st.bar_chart(
-        dados_filtrados.set_index("data")[["perda_ovos"]],
-        height=300,
-    )
+        x_axis, x_scale = _build_x_axis_and_scale(df_long)
+
+        chart_prod = (
+            alt.Chart(df_long)
+            .encode(
+                x=alt.X("data:T", axis=x_axis, scale=x_scale),
+                y=alt.Y("ovos:Q", title="Produção de ovos (unid./dia)"),
+                color=alt.Color(
+                    "origem:N",
+                    title="Origem",
+                    scale=alt.Scale(domain=["ovos_granja", "ovos_escola"],
+                                    range=["#1f77b4", "#ff7f0e"]),
+                    legend=alt.Legend(labelExpr="replace(replace(datum.label,'ovos_granja','Granja'),'ovos_escola','Escola')"),
+                ),
+                tooltip=[
+                    alt.Tooltip("data:T", title="Data"),
+                    alt.Tooltip("origem:N", title="Origem"),
+                    alt.Tooltip("ovos:Q", title="Ovos", format=".0f"),
+                ],
+            )
+            .mark_line()
+        )
+
+        pontos_prod = (
+            alt.Chart(df_long)
+            .encode(
+                x=alt.X("data:T", axis=x_axis, scale=x_scale),
+                y=alt.Y("ovos:Q"),
+                color="origem:N",
+            )
+            .mark_point(size=50)
+        )
+
+        st.markdown("### Produção diária de ovos (granja vs. escola)")
+        st.altair_chart((chart_prod + pontos_prod).properties(height=300), use_container_width=True)
+
+        st.markdown(
+            """
+            **Referência conceitual:**  
+            - A curva da escola deveria acompanhar de perto a curva da granja.  
+            - Diferenças sistemáticas indicam perdas no transporte, registro ou manejo.
+            """
+        )
+
+    if "perda_ovos" in dados_filtrados.columns:
+        df_perdas = dados_filtrados[["data", "perda_ovos"]].dropna(subset=["perda_ovos"]).copy()
+
+        chart_perdas = chart_serie_altair(
+            df=df_perdas,
+            col="perda_ovos",
+            titulo="Perdas no trajeto (granja → escola)",
+            ref_min=None,
+            ref_max=None,
+            ylim=None,
+            y_label="Perdas (ovos)",
+            value_format=".0f",
+            tooltip_label="Perdas (ovos)",
+        )
+
+        st.markdown("### Perdas no trajeto (granja → escola)")
+        if chart_perdas is not None:
+            st.altair_chart(chart_perdas, use_container_width=True)
 
     total_granja = dados_filtrados["ovos_granja"].sum()
     total_escola = dados_filtrados["ovos_escola"].sum()
     total_perdas = dados_filtrados["perda_ovos"].sum()
 
-    # Diagnóstico abaixo dos gráficos
     st.markdown(
         f"""
         **Diagnóstico de produção e perdas (período filtrado):**  
@@ -765,16 +981,27 @@ st.markdown("---")
 # =============================================================================
 # PARTE 8 – SEÇÃO 4: QUALIDADE & SANIDADE (VERTICAL)
 # =============================================================================
-st.markdown("<div id='qualidade' style='position: relative; top: -30px;'></div>",unsafe_allow_html=True,)
+st.markdown("<div id='qualidade' style='position: relative; top: -40px;'></div>", unsafe_allow_html=True)
 st.subheader("Qualidade dos ovos & sanidade · linha do tempo")
 
-# Gráfico de percentual de defeituosos
-if {"pct_defeituosos"}.issubset(dados_filtrados.columns):
-    st.markdown("### Percentual de ovos não conformes (%)")
-    st.line_chart(
-        dados_filtrados.set_index("data")[["pct_defeituosos"]],
-        height=300,
+if "pct_defeituosos" in dados_filtrados.columns:
+    df_qual = dados_filtrados[["data", "pct_defeituosos"]].dropna(subset=["pct_defeituosos"]).copy()
+
+    chart_qual = chart_serie_altair(
+        df=df_qual,
+        col="pct_defeituosos",
+        titulo="Percentual de ovos não conformes (%)",
+        ref_min=0,
+        ref_max=5,
+        ylim=None,
+        y_label="% de ovos não conformes",
+        value_format=".1f",
+        tooltip_label="% não conformes",
     )
+
+    if chart_qual is not None:
+        st.altair_chart(chart_qual, use_container_width=True)
+
     st.markdown(
         """
         **Referência prática:**  
@@ -784,7 +1011,6 @@ if {"pct_defeituosos"}.issubset(dados_filtrados.columns):
         """
     )
 
-# Cards de métricas (mantidos em duas colunas só para compactar)
 col_q1, col_q2 = st.columns(2)
 with col_q1:
     if "ovos_defeituosos" in dados_filtrados.columns:
@@ -795,7 +1021,6 @@ with col_q2:
         total_doentes = dados_filtrados["aves_doentes"].sum()
         st.metric("Soma de aves doentes observadas", f"{total_doentes:.0f}")
 
-# Tabela detalhada ao final como "rodapé" do feed
 st.markdown("### Tabela detalhada (dados filtrados)")
 st.dataframe(
     dados_filtrados[
@@ -829,6 +1054,7 @@ st.caption(
     "seguindo o mesmo padrão de colunas. Ao recarregar a página, os gráficos são atualizados automaticamente."
 )
 
+
 # =====================================================================
 # DISPARA O SCROLL APÓS DESENHAR TODA A PÁGINA
 # =====================================================================
@@ -842,6 +1068,3 @@ elif secao == "Produção e perdas":
     scroll_to("producao")
 elif secao == "Qualidade & sanidade":
     scroll_to("qualidade")
-
-
-
