@@ -534,7 +534,7 @@ def bloco_instagram_mistura(df, col, titulo, ref_min, ref_max, texto_ref, nome_c
 # PARTE 5 – SEÇÃO 1: MISTURA DA RAÇÃO (FEED VERTICAL)
 # =============================================================================
 #st.markdown("<div id='mistura'></div>", unsafe_allow_html=True)
-st.markdown("<div id='mistura' style='position: relative; top: -30px;'></div>",unsafe_allow_html=True,)
+st.markdown("<div id='mistura' style='position: relative; top: -40px;'></div>",unsafe_allow_html=True,)
 st.subheader("Mistura da ração · linha do tempo")
 
 #st.markdown(
@@ -842,5 +842,6 @@ elif secao == "Produção e perdas":
     scroll_to("producao")
 elif secao == "Qualidade & sanidade":
     scroll_to("qualidade")
+
 
 
