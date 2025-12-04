@@ -362,7 +362,7 @@ def chart_serie_altair(
     camadas.append(pontos)
 
     # Rótulos numéricos sobre os pontos
-    textos = base.mark_text(dy=-20, fontSize=15, color="white").encode(
+    textos = base.mark_text(dy=-20, fontSize=10, color="white").encode(
         y=alt.Y(f"{col}:Q", scale=scale_y),
         text=alt.Text(f"{col}:Q", format=value_format),
     )
